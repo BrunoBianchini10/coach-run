@@ -98,6 +98,7 @@ input[type=range]{flex:1;accent-color:var(--brand);}
 .status-on{background:rgba(52,211,153,0.14);color:var(--on);border:1px solid rgba(52,211,153,0.35);}
 .status-accelerate{background:rgba(245,72,77,0.14);color:var(--accel);border:1px solid rgba(245,72,77,0.35);}
 .status-slow{background:rgba(251,191,36,0.14);color:var(--slow);border:1px solid rgba(251,191,36,0.35);}
+.status-warmup{background:rgba(76,154,255,0.14);color:var(--brand);border:1px solid rgba(76,154,255,0.35);}
 
 .stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:14px 0;}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center;}
@@ -149,14 +150,14 @@ table.splits td{padding:7px 4px;border-bottom:1px solid var(--line);}
 
     <div id="fields-distance_time">
       <div class="row2" style="margin-top:16px;">
-        <div class="field"><label>Distância (km)</label><input type="number" id="inDist" value="10" step="0.1" min="0.1"></div>
-        <div class="field"><label>Tempo alvo (mm:ss)</label><input type="text" id="inTime" value="50:00"></div>
+        <div class="field"><label>Distância (km)</label><input type="number" id="inDist" value="10" step="0.1" min="0.1" inputmode="decimal"></div>
+        <div class="field"><label>Tempo alvo (mm:ss)</label><input type="text" id="inTime" value="50:00" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
       </div>
     </div>
     <div id="fields-fixed_pace" style="display:none;">
       <div class="row2" style="margin-top:16px;">
-        <div class="field"><label>Pace alvo (min:seg /km)</label><input type="text" id="inPace" value="5:00"></div>
-        <div class="field"><label>Duração planejada (mm:ss)</label><input type="text" id="inDur" value="30:00"></div>
+        <div class="field"><label>Pace alvo (min:seg /km)</label><input type="text" id="inPace" value="5:00" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label>Duração planejada (mm:ss)</label><input type="text" id="inDur" value="30:00" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
       </div>
     </div>
 
@@ -182,8 +183,8 @@ table.splits td{padding:7px 4px;border-bottom:1px solid var(--line);}
       <button data-val="distance" onclick="setCheckMode('distance')">Por distância</button>
     </div>
     <div class="row2" style="margin-top:16px;">
-      <div class="field" id="wrapCheckTime"><label>A cada (minutos)</label><input type="number" id="inCheckTime" value="5" min="1"></div>
-      <div class="field" id="wrapCheckDist"><label>A cada (km)</label><input type="number" id="inCheckDist" value="1" step="0.1" min="0.1"></div>
+      <div class="field" id="wrapCheckTime"><label>A cada (minutos)</label><input type="number" id="inCheckTime" value="5" min="1" inputmode="numeric"></div>
+      <div class="field" id="wrapCheckDist"><label>A cada (km)</label><input type="number" id="inCheckDist" value="1" step="0.1" min="0.1" inputmode="decimal"></div>
     </div>
     <div class="hint">"Combinado" avisa no que vier primeiro — tempo ou distância.</div>
   </div>
@@ -328,10 +329,17 @@ setCheckMode('both');
 
 /* ---------------- parsing helpers ---------------- */
 function parseMMSS(str){
-  const parts = str.split(':').map(s=>parseInt(s,10)||0);
+  const s = String(str==null?'':str).trim().replace(',','.');
+  if(!s) return 0;
+  if(s.indexOf(':')===-1){
+    // número solto = MINUTOS (digitar "25" significa 25min, não 25s)
+    const n = parseFloat(s);
+    return isFinite(n) && n>0 ? Math.round(n*60) : 0;
+  }
+  const parts = s.split(':').map(p=>parseInt(p,10)||0);
   if(parts.length===2) return parts[0]*60+parts[1];
   if(parts.length===3) return parts[0]*3600+parts[1]*60+parts[2];
-  return parseInt(str,10)||0;
+  return 0;
 }
 function fmtClock(sec){
   sec = Math.max(0,Math.round(sec));
@@ -341,7 +349,9 @@ function fmtClock(sec){
 }
 function fmtPace(secPerKm){
   if(!isFinite(secPerKm) || secPerKm<=0 || secPerKm>1800) return '--:--';
-  const m=Math.floor(secPerKm/60), s=Math.round(secPerKm%60);
+  // arredondar o total antes de separar: 299.85s virava "4:60" em vez de "5:00"
+  const total = Math.round(secPerKm);
+  const m = Math.floor(total/60), s = total%60;
   return m+':'+String(s).padStart(2,'0');
 }
 function haversine(lat1,lon1,lat2,lon2){
@@ -364,6 +374,10 @@ function buildConfig(){
     voiceOn: $('swVoice').classList.contains('on'),
     beepsOn: $('swBeeps').classList.contains('on'),
     simulate: $('swSim').classList.contains('on'),
+    // aquecimento: nada de julgar o ritmo antes disso — o GPS ainda está
+    // estabilizando e o atleta está saindo da inércia
+    warmupSec: 45,
+    warmupMinM: 100,
   };
   if(c.goalType==='distance_time'){
     c.totalDistanceM = parseFloat($('inDist').value)*1000;
@@ -372,7 +386,7 @@ function buildConfig(){
     const paceSec = parseMMSS($('inPace').value);
     const durSec = parseMMSS($('inDur').value);
     c.totalTimeSec = durSec;
-    c.totalDistanceM = (durSec/paceSec)*1000;
+    c.totalDistanceM = paceSec>0 ? (durSec/paceSec)*1000 : 0;
   }
   c.basePaceSecPerKm = c.totalTimeSec / (c.totalDistanceM/1000);
   return c;
@@ -385,8 +399,18 @@ function startWorkoutFlow(){
     alert('Confira os valores de meta — algo ficou inválido.');
     return;
   }
+  // o teclado do iOS mantém o "Desfazer Digitação" grudado no campo focado;
+  // tirar o foco antes de começar a correr evita que ele dispare com o balanço
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  unlockAudio();
+
   state = {
     startedAt: Date.now(),
+    lastTickMs: Date.now(),
+    pausedAccumMs: 0,
+    pausedAt: null,
+    finished: false,
+    gpsError: false,
     elapsedSec: 0,
     distanceM: 0,
     paused: false,
@@ -395,12 +419,15 @@ function startWorkoutFlow(){
     checkpoints: [],   // announced checkpoints for summary table
     lastCheckTime: 0,
     lastCheckDist: 0,
-    lastExceptionAt: -999,
-    lastAnnounceAt: -999,
+    lastExceptionAt: 0,
+    lastAnnounceAt: 0,
     simHeading: Math.random()*Math.PI*2,
     simLat: -23.55, simLng: -46.63,
   };
   $('rLog').innerHTML = '';
+  const banner0 = $('statusBanner');
+  banner0.className = 'status-banner status-warmup';
+  banner0.textContent = 'AQUECENDO…';
   logLine('Treino iniciado. Meta: '+ (cfg.goalType==='distance_time' ? (cfg.totalDistanceM/1000).toFixed(1)+'km em '+fmtClock(cfg.totalTimeSec) : 'pace '+fmtPace(cfg.basePaceSecPerKm)+'/km por '+fmtClock(cfg.totalTimeSec)) + '.');
   goTo('running');
   $('pauseBtn').textContent='Pausar';
@@ -413,12 +440,44 @@ function startWorkoutFlow(){
   } else {
     logLine('Geolocalização não disponível neste navegador. Ative o modo simulação.');
   }
+  requestWakeLock();
   tickTimer = setInterval(tick, 1000);
 }
 
+/* ---------------- tela ligada (wake lock) ---------------- */
+let wakeLock = null;
+async function requestWakeLock(){
+  if(!('wakeLock' in navigator)){
+    logLine('Este navegador não permite manter a tela ligada — desative o bloqueio automático nos ajustes do celular.');
+    return;
+  }
+  try{
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', ()=>{ wakeLock = null; });
+  }catch(e){
+    logLine('Não foi possível manter a tela ligada: '+e.message);
+  }
+}
+function releaseWakeLock(){
+  try{ if(wakeLock) wakeLock.release(); }catch(e){}
+  wakeLock = null;
+}
+// o sistema solta o wake lock ao esconder a aba; reconquista ao voltar
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && state && !state.finished && !state.paused && !wakeLock){
+    requestWakeLock();
+  }
+});
+
 function onPosition(pos){
-  const {latitude:lat, longitude:lng, accuracy, speed} = pos.coords;
-  if(accuracy && accuracy>35) return; // ignore low-accuracy fixes
+  if(!state || state.finished) return;
+  const {latitude:lat, longitude:lng, accuracy} = pos.coords;
+  state.gpsError = false;
+  // o primeiro fix quase sempre vem impreciso (50–100m). Aceitá-lo apenas semeia
+  // a rota — não soma distância, porque não há ponto anterior — e tira o app do
+  // estado "sem GPS" em vez de deixar a distância travada em zero
+  const accLimit = state.points.length===0 ? 100 : 40;
+  if(accuracy && accuracy>accLimit) return;
   const t = state.elapsedSec;
   if(state.points.length>0){
     const prev = state.points[state.points.length-1];
@@ -433,24 +492,40 @@ function onPosition(pos){
   $('statusDot').style.background = 'var(--on)';
 }
 function onPositionError(err){
+  // quem pinta o banner é o updateRunningUI: antes ele reescrevia este aviso
+  // um segundo depois, e o erro de GPS ficava invisível
+  if(state) state.gpsError = true;
   logLine('GPS: '+ err.message + '. Verifique a permissão de localização.');
   $('statusDot').style.background = 'var(--accel)';
-  const banner = $('statusBanner');
-  banner.className = 'status-banner status-accelerate';
-  banner.textContent = 'SEM GPS — abra numa aba do navegador ou use simulação';
 }
 
 function togglePause(){
+  if(!state || state.finished) return;
   state.paused = !state.paused;
+  if(state.paused){
+    state.pausedAt = Date.now();
+    releaseWakeLock();
+  } else {
+    if(state.pausedAt) state.pausedAccumMs += Date.now() - state.pausedAt;
+    state.pausedAt = null;
+    state.lastTickMs = Date.now();
+    requestWakeLock();
+  }
   $('pauseBtn').textContent = state.paused ? 'Retomar' : 'Pausar';
   logLine(state.paused ? 'Pausado.' : 'Retomado.');
 }
 
 function tick(){
-  if(!state || state.paused) return;
-  state.elapsedSec += 1;
+  if(!state || state.paused || state.finished) return;
+  const now = Date.now();
+  const dtSec = Math.max(0, (now - state.lastTickMs)/1000);
+  state.lastTickMs = now;
+  // relógio de parede: setInterval é estrangulado quando a aba sai de foco, e
+  // contar "+1 por tick" faria o app subestimar o tempo decorrido — justamente
+  // o número que decide se você está dentro ou fora da meta
+  state.elapsedSec = Math.max(0, Math.floor((now - state.startedAt - state.pausedAccumMs)/1000));
 
-  if(cfg.simulate) simulateStep();
+  if(cfg.simulate) simulateStep(dtSec);
 
   state.samples.push({t:state.elapsedSec, distM: state.distanceM});
   if(state.samples.length>600) state.samples.shift();
@@ -465,16 +540,17 @@ function tick(){
   }
 }
 
-function simulateStep(){
+function simulateStep(dtSec){
+  const dt = (isFinite(dtSec) && dtSec>0) ? Math.min(dtSec, 5) : 1;
   const progress = Math.min(1, state.distanceM/cfg.totalDistanceM);
   const targetPace = targetPaceAt(progress);
   const noise = (Math.random()-0.5)*0.16; // +-8%
   const paceNow = targetPace*(1+noise);
-  const metersThisSec = 1000/paceNow;
-  state.distanceM += metersThisSec;
+  const meters = (1000/paceNow)*dt;
+  state.distanceM += meters;
   state.simHeading += (Math.random()-0.5)*0.3;
-  state.simLat += Math.cos(state.simHeading)*(metersThisSec/111111);
-  state.simLng += Math.sin(state.simHeading)*(metersThisSec/(111111*Math.cos(state.simLat*Math.PI/180)));
+  state.simLat += Math.cos(state.simHeading)*(meters/111111);
+  state.simLng += Math.sin(state.simHeading)*(meters/(111111*Math.cos(state.simLat*Math.PI/180)));
   state.points.push({lat:state.simLat,lng:state.simLng,t:state.elapsedSec});
 }
 
@@ -504,9 +580,16 @@ function requiredPaceRemaining(){
   if(remTime<=0) return Infinity;
   return remTime/remDist;
 }
+function isWarmingUp(){
+  return state.elapsedSec < cfg.warmupSec || state.distanceM < cfg.warmupMinM;
+}
 function computeStatus(){
   const cur = rollingPace(45) ?? cfg.basePaceSecPerKm;
   const need = requiredPaceRemaining();
+  // na largada a distância ainda é ~0 (GPS estabilizando + atleta saindo da
+  // inércia), o pace calculado é infinito e qualquer julgamento aqui vira um
+  // "acelere" injusto antes do primeiro passo
+  if(isWarmingUp()) return {status:'warmup', devPct:0, cur, need};
   if(!isFinite(need)) return {status:'accelerate', devPct: 999, cur, need};
   if(need<=0) return {status:'on', devPct:0, cur, need};
   const devPct = ((cur-need)/need)*100;
@@ -524,11 +607,19 @@ function updateRunningUI(){
   $('rNeed').textContent = fmtPace(need);
 
   const banner = $('statusBanner');
-  banner.className = 'status-banner status-'+status;
-  banner.textContent = status==='on' ? 'NO RITMO CERTO' : status==='accelerate' ? 'ACELERE UM POUCO' : 'REDUZA O RITMO';
+  if(state.gpsError && state.points.length===0){
+    // sem nenhum ponto de GPS não há treino nenhum — esse aviso tem prioridade
+    banner.className = 'status-banner status-accelerate';
+    banner.textContent = 'SEM GPS — VERIFIQUE A PERMISSÃO DE LOCALIZAÇÃO';
+  } else {
+    banner.className = 'status-banner status-'+status;
+    banner.textContent = status==='warmup' ? 'AQUECENDO…'
+      : status==='on' ? 'NO RITMO CERTO'
+      : status==='accelerate' ? 'ACELERE UM POUCO' : 'REDUZA O RITMO';
+  }
 
   const needle = $('gaugeNeedle');
-  const clamped = Math.max(-2, Math.min(2, devPct/(cfg.tolerancePct*100)));
+  const clamped = status==='warmup' ? 0 : Math.max(-2, Math.min(2, devPct/(cfg.tolerancePct*100)));
   needle.style.transform = 'rotate('+(clamped*70)+'deg)';
 }
 
@@ -547,11 +638,19 @@ function checkCheckpoints(){
 function announceCheckpoint(){
   const {status, devPct, cur, need} = computeStatus();
   const km = (state.distanceM/1000).toFixed(2);
-  const deltaSec = Math.round(Math.abs(cur-need));
-  let msg = 'Km '+km+', tempo '+fmtClock(state.elapsedSec)+'. Pace atual '+fmtPace(cur)+' por quilômetro. ';
-  if(status==='on') msg += 'Você está no ritmo certo para a meta.';
-  else if(status==='accelerate') msg += 'Você precisa acelerar cerca de '+deltaSec+' segundos por quilômetro para bater a meta.';
-  else msg += 'Você está adiantado. Pode reduzir cerca de '+deltaSec+' segundos por quilômetro.';
+  // parado ou sem sinal, o pace vira infinito — falar "traço traço" ou
+  // "acelerar Infinity segundos" seria pior que omitir o número
+  const paceTxt = isFinite(cur) ? 'Pace atual '+fmtPace(cur)+' por quilômetro. ' : '';
+  const deltaSec = (isFinite(cur) && isFinite(need)) ? Math.round(Math.abs(cur-need)) : null;
+  let msg = 'Km '+km+', tempo '+fmtClock(state.elapsedSec)+'. '+paceTxt;
+  if(status==='warmup') msg += 'Ainda aquecendo, sem correção por enquanto.';
+  else if(status==='on') msg += 'Você está no ritmo certo para a meta.';
+  else if(status==='accelerate') msg += deltaSec!==null
+    ? 'Você precisa acelerar cerca de '+deltaSec+' segundos por quilômetro para bater a meta.'
+    : 'Você precisa acelerar para bater a meta.';
+  else msg += deltaSec!==null
+    ? 'Você está adiantado. Pode reduzir cerca de '+deltaSec+' segundos por quilômetro.'
+    : 'Você está adiantado, pode reduzir um pouco.';
 
   logLine(msg, true);
   speak(msg);
@@ -562,7 +661,7 @@ function announceCheckpoint(){
 
 function checkException(){
   const {status, devPct} = computeStatus();
-  if(status==='on') return;
+  if(status==='on' || status==='warmup') return;
   if(state.elapsedSec - state.lastAnnounceAt < 12) return;
   if(state.elapsedSec - state.lastExceptionAt < 40) return;
   state.lastExceptionAt = state.elapsedSec;
@@ -579,6 +678,18 @@ function logLine(text, bold){
 }
 
 /* ---------------- audio ---------------- */
+// o iOS só libera o AudioContext dentro de um gesto do usuário. Criá-lo apenas
+// no primeiro bip — que acontece no meio da corrida — deixava os bips mudos.
+function unlockAudio(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    g.gain.value = 0.0001;                 // inaudível: serve só para destravar
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime+0.02);
+  }catch(e){}
+}
 function speak(text){
   if(!cfg.voiceOn || !('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
@@ -591,6 +702,7 @@ function beep(status){
   if(!cfg.beepsOn) return;
   try{
     audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
     const freq = status==='accelerate' ? 880 : status==='slow' ? 440 : 660;
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
@@ -606,9 +718,13 @@ function beep(status){
 
 /* ---------------- finish + summary ---------------- */
 function finishWorkout(){
+  if(!state || state.finished) return;   // evita salvar duas vezes se o
+  state.finished = true;                 // auto-finish e o botão coincidirem
   clearInterval(tickTimer);
+  tickTimer = null;
   if(watchId!==null) navigator.geolocation.clearWatch(watchId);
   watchId=null;
+  releaseWakeLock();
   const achieved = state.elapsedSec <= cfg.totalTimeSec*1.03 && state.distanceM >= cfg.totalDistanceM*0.97;
   speak(achieved ? 'Treino finalizado. Você bateu a meta, parabéns!' : 'Treino finalizado.');
 
@@ -724,14 +840,18 @@ function safeStringify(obj){
     return v;
   });
 }
-async function saveWorkout(rec){
+// window.storage só existe dentro do sandbox de artifacts do Claude — em
+// qualquer navegador comum (GitHub Pages incluso) ele é undefined, e por isso
+// o histórico nunca chegou a gravar nada fora do chat
+const STORE_PREFIX = 'pacecoach:workout:';
+function saveWorkout(rec){
   try{
-    await window.storage.set('workouts:'+rec.id, safeStringify(rec), false);
+    localStorage.setItem(STORE_PREFIX+rec.id, safeStringify(rec));
   }catch(e){
     console.error('storage error, tentando versão reduzida', e);
     try{
-      const slim = {...rec, points:[]};
-      await window.storage.set('workouts:'+rec.id, safeStringify(slim), false);
+      // sem os pontos de rota o registro cabe mesmo com a cota quase cheia
+      localStorage.setItem(STORE_PREFIX+rec.id, safeStringify({...rec, points:[]}));
     }catch(e2){
       console.error('storage error (fallback também falhou)', e2);
       logHistorySaveFailure();
@@ -744,24 +864,23 @@ function logHistorySaveFailure(){
   note.textContent = 'Não foi possível salvar este treino no histórico agora.';
   $('screen-summary').querySelector('.card').appendChild(note);
 }
-async function loadWorkouts(){
+function loadWorkouts(){
+  const items = [];
   try{
-    const listRes = await window.storage.list('workouts:', false);
-    if(!listRes || !listRes.keys) return [];
-    const items = [];
-    for(const k of listRes.keys){
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(!k || k.indexOf(STORE_PREFIX)!==0) continue;
       try{
-        const r = await window.storage.get(k, false);
-        if(r) items.push(JSON.parse(r.value));
+        const rec = JSON.parse(localStorage.getItem(k));
+        if(rec && rec.result && rec.cfg) items.push(rec);
       }catch(e){}
     }
-    return items.sort((a,b)=> b.id - a.id);
   }catch(e){ return []; }
+  return items.sort((a,b)=> b.id - a.id);
 }
-async function renderHistory(){
+function renderHistory(){
   const list = $('historyList');
-  list.innerHTML = '<div class="empty">Carregando…</div>';
-  const items = await loadWorkouts();
+  const items = loadWorkouts();
   if(items.length===0){
     list.innerHTML = '<div class="empty"><div class="display">Nenhum treino ainda</div>Seus treinos aparecerão aqui depois de finalizados.</div>';
     return;

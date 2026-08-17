@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ritmo — treinador de pace por voz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0F14;
+  --surface:#131A21;
+  --surface2:#1B242C;
+  --line:#25313B;
+  --text:#F2F6F8;
+  --muted:#7E8B96;
+  --on:#34D399;
+  --accel:#F5484D;
+  --slow:#FBBF24;
+  --brand:#4C9AFF;
+  --radius:18px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;-webkit-tap-highlight-color:transparent;}
+body{min-height:100vh;display:flex;flex-direction:column;}
+.mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
+.display{font-family:'Bebas Neue',sans-serif;letter-spacing:0.03em;}
+
+header.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:rgba(11,15,20,0.92);backdrop-filter:blur(6px);z-index:10;
+}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--on);box-shadow:0 0 10px var(--on);}
+.brand h1{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:0.06em;margin:0;}
+nav.tabs{display:flex;gap:6px;}
+nav.tabs button{
+  background:transparent;border:1px solid var(--line);color:var(--muted);
+  padding:8px 14px;border-radius:20px;font-size:13px;font-weight:600;font-family:inherit;
+}
+nav.tabs button.active{background:var(--brand);border-color:var(--brand);color:#06131F;}
+
+main{flex:1;padding:18px;max-width:520px;width:100%;margin:0 auto;padding-bottom:60px;}
+.screen{display:none;animation:fade .25s ease;}
+.screen.active{display:block;}
+@keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:14px;}
+.card h2{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.04em;margin:0 0 14px;color:var(--text);}
+.eyebrow{color:var(--brand);font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:4px;}
+
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:500;}
+.field input[type=number], .field input[type=text]{
+  width:100%;background:var(--surface2);border:1px solid var(--line);color:var(--text);
+  padding:12px 14px;border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:16px;
+}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.seg{display:flex;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:3px;}
+.seg button{flex:1;background:transparent;border:none;color:var(--muted);padding:9px 6px;border-radius:8px;font-size:13px;font-weight:600;font-family:inherit;}
+.seg button.active{background:var(--brand);color:#06131F;}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;}
+.toggle-row .lbl{font-size:14px;font-weight:500;}
+.toggle-row .lbl small{display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:2px;}
+.switch{position:relative;width:44px;height:26px;background:var(--surface2);border:1px solid var(--line);border-radius:20px;flex-shrink:0;}
+.switch.on{background:var(--brand);border-color:var(--brand);}
+.switch::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:transform .15s;}
+.switch.on::after{transform:translateX(18px);}
+.hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5;}
+.slider-row{display:flex;align-items:center;gap:12px;}
+input[type=range]{flex:1;accent-color:var(--brand);}
+.pill{display:inline-block;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;background:var(--surface2);border:1px solid var(--line);}
+
+.btn{
+  width:100%;padding:15px;border-radius:12px;border:none;font-family:'Bebas Neue',sans-serif;
+  font-size:19px;letter-spacing:0.05em;text-align:center;display:block;
+}
+.btn-primary{background:var(--brand);color:#06131F;}
+.btn-danger{background:var(--accel);color:#1A0506;}
+.btn-ghost{background:transparent;border:1px solid var(--line);color:var(--text);}
+.btn-row{display:flex;gap:10px;}
+.btn-row .btn{flex:1;}
+
+/* running screen */
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;padding:10px 0 4px;}
+.gauge{position:relative;width:250px;height:250px;border-radius:50%;
+  background:conic-gradient(from 180deg, var(--slow) 0deg, var(--surface2) 60deg, var(--surface2) 300deg, var(--accel) 360deg);
+  display:flex;align-items:center;justify-content:center;}
+.gauge::before{content:'';position:absolute;width:210px;height:210px;border-radius:50%;background:var(--bg);}
+.gauge-needle{position:absolute;width:4px;height:110px;top:15px;left:calc(50% - 2px);
+  background:var(--text);border-radius:4px;transform-origin:50% 110px;transition:transform .4s ease;}
+.gauge-needle::after{content:'';position:absolute;bottom:-6px;left:-5px;width:14px;height:14px;border-radius:50%;background:var(--text);}
+.gauge-core{position:relative;z-index:2;text-align:center;}
+.gauge-core .time{font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:700;line-height:1;}
+.gauge-core .lbl{font-size:11px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-top:4px;}
+.status-banner{text-align:center;padding:10px;border-radius:12px;font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.04em;margin:14px 0;}
+.status-on{background:rgba(52,211,153,0.14);color:var(--on);border:1px solid rgba(52,211,153,0.35);}
+.status-accelerate{background:rgba(245,72,77,0.14);color:var(--accel);border:1px solid rgba(245,72,77,0.35);}
+.status-slow{background:rgba(251,191,36,0.14);color:var(--slow);border:1px solid rgba(251,191,36,0.35);}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:14px 0;}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center;}
+.stat .v{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;}
+.stat .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-top:3px;}
+
+.log{max-height:150px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);}
+.log div{padding:5px 0;border-bottom:1px solid var(--line);}
+.log div span{color:var(--text);}
+
+canvas{width:100%;background:var(--surface2);border-radius:12px;display:block;}
+
+.history-item{display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;}
+.history-item .l small{display:block;color:var(--muted);font-size:12px;margin-top:2px;}
+.badge{font-size:11px;font-weight:700;padding:4px 9px;border-radius:20px;}
+.badge-ok{background:rgba(52,211,153,0.16);color:var(--on);}
+.badge-no{background:rgba(245,72,77,0.16);color:var(--accel);}
+
+.empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:14px;}
+.empty .display{font-size:26px;color:var(--text);margin-bottom:8px;}
+
+.footer-note{font-size:11px;color:var(--muted);text-align:center;margin-top:20px;line-height:1.6;}
+table.splits{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:12px;}
+table.splits th{text-align:left;color:var(--muted);font-weight:500;padding:6px 4px;border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;}
+table.splits td{padding:7px 4px;border-bottom:1px solid var(--line);}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><div class="dot" id="statusDot"></div><h1>RITMO</h1></div>
+  <nav class="tabs">
+    <button id="tabNovo" class="active" onclick="goTo('setup')">Novo</button>
+    <button id="tabHist" onclick="goTo('history')">Histórico</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- SETUP -->
+<section id="screen-setup" class="screen active">
+  <div class="card">
+    <div class="eyebrow">Passo 1</div>
+    <h2>Tipo de meta</h2>
+    <div class="seg" id="goalTypeSeg">
+      <button class="active" data-val="distance_time" onclick="setGoalType('distance_time')">Distância + tempo</button>
+      <button data-val="fixed_pace" onclick="setGoalType('fixed_pace')">Pace fixo</button>
+    </div>
+
+    <div id="fields-distance_time">
+      <div class="row2" style="margin-top:16px;">
+        <div class="field"><label>Distância (km)</label><input type="number" id="inDist" value="10" step="0.1" min="0.1"></div>
+        <div class="field"><label>Tempo alvo (mm:ss)</label><input type="text" id="inTime" value="50:00"></div>
+      </div>
+    </div>
+    <div id="fields-fixed_pace" style="display:none;">
+      <div class="row2" style="margin-top:16px;">
+        <div class="field"><label>Pace alvo (min:seg /km)</label><input type="text" id="inPace" value="5:00"></div>
+        <div class="field"><label>Duração planejada (mm:ss)</label><input type="text" id="inDur" value="30:00"></div>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="lbl">Negative split<small>Começar mais devagar, terminar mais rápido</small></div>
+      <div class="switch" id="swNegSplit" onclick="toggleSwitch('swNegSplit')"></div>
+    </div>
+    <div class="field" id="negSplitAmountWrap" style="display:none;margin-top:8px;">
+      <label>Variação início→fim (%)</label>
+      <div class="slider-row">
+        <input type="range" id="inNegSplitPct" min="2" max="15" value="6">
+        <span class="pill mono" id="negSplitPctLbl">6%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Passo 2</div>
+    <h2>Frequência das instruções</h2>
+    <div class="seg" id="checkModeSeg">
+      <button class="active" data-val="both" onclick="setCheckMode('both')">Combinado</button>
+      <button data-val="time" onclick="setCheckMode('time')">Por tempo</button>
+      <button data-val="distance" onclick="setCheckMode('distance')">Por distância</button>
+    </div>
+    <div class="row2" style="margin-top:16px;">
+      <div class="field" id="wrapCheckTime"><label>A cada (minutos)</label><input type="number" id="inCheckTime" value="5" min="1"></div>
+      <div class="field" id="wrapCheckDist"><label>A cada (km)</label><input type="number" id="inCheckDist" value="1" step="0.1" min="0.1"></div>
+    </div>
+    <div class="hint">"Combinado" avisa no que vier primeiro — tempo ou distância.</div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Passo 3</div>
+    <h2>Sensibilidade dos alertas</h2>
+    <div class="field">
+      <label>Tolerância de desvio antes de alertar</label>
+      <div class="slider-row">
+        <input type="range" id="inTolerance" min="3" max="15" value="6">
+        <span class="pill mono" id="toleranceLbl">6%</span>
+      </div>
+      <div class="hint">Além dos avisos programados, o app interrompe com um alerta extra se você fugir da meta além dessa margem, mesmo fora do horário previsto.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Passo 4</div>
+    <h2>Áudio</h2>
+    <div class="toggle-row">
+      <div class="lbl">Voz<small>Instruções faladas em português</small></div>
+      <div class="switch on" id="swVoice" onclick="toggleSwitch('swVoice')"></div>
+    </div>
+    <div class="toggle-row">
+      <div class="lbl">Bips<small>Agudo = acelerar · Grave = reduzir</small></div>
+      <div class="switch on" id="swBeeps" onclick="toggleSwitch('swBeeps')"></div>
+    </div>
+    <div class="toggle-row">
+      <div class="lbl">Modo simulação<small>Testa a lógica e o áudio sem se mover (sem GPS)</small></div>
+      <div class="switch" id="swSim" onclick="toggleSwitch('swSim')"></div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="startWorkoutFlow()">Iniciar treino</button>
+  <div class="footer-note" id="gpsNote">O rastreamento usa o GPS do navegador. Funciona com a tela ligada e o app em primeiro plano — em segundo plano ou com a tela travada, o navegador pausa a localização (limitação do próprio sistema, não do app). Ative "Modo simulação" para testar sem sair de casa.</div>
+</section>
+
+<!-- RUNNING -->
+<section id="screen-running" class="screen">
+  <div class="gauge-wrap">
+    <div class="gauge" id="gaugeEl">
+      <div class="gauge-needle" id="gaugeNeedle" style="transform:rotate(0deg);"></div>
+      <div class="gauge-core">
+        <div class="time mono" id="rClock">00:00</div>
+        <div class="lbl">tempo decorrido</div>
+      </div>
+    </div>
+  </div>
+  <div class="status-banner status-on" id="statusBanner">AVALIANDO…</div>
+
+  <div class="stat-grid">
+    <div class="stat"><div class="v mono" id="rDist">0.00</div><div class="k">km</div></div>
+    <div class="stat"><div class="v mono" id="rPace">--:--</div><div class="k">pace atual</div></div>
+    <div class="stat"><div class="v mono" id="rNeed">--:--</div><div class="k">pace necessário</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico de avisos</h2>
+    <div class="log" id="rLog"><div>Aguardando início…</div></div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-ghost" id="pauseBtn" onclick="togglePause()">Pausar</button>
+    <button class="btn btn-danger" onclick="finishWorkout()">Finalizar</button>
+  </div>
+</section>
+
+<!-- SUMMARY -->
+<section id="screen-summary" class="screen">
+  <div class="card" style="text-align:center;">
+    <div class="eyebrow" id="sumBadgeWrap"></div>
+    <h2 style="font-size:30px;" id="sumTitle">Resumo do treino</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="v mono" id="sDist">0.00</div><div class="k">km</div></div>
+      <div class="stat"><div class="v mono" id="sTime">0:00</div><div class="k">tempo total</div></div>
+      <div class="stat"><div class="v mono" id="sPace">--:--</div><div class="k">pace médio</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Rota</h2>
+    <canvas id="mapCanvas" height="220"></canvas>
+  </div>
+  <div class="card">
+    <h2>Pace por trecho</h2>
+    <canvas id="chartCanvas" height="160"></canvas>
+  </div>
+  <div class="card">
+    <h2>Parciais</h2>
+    <table class="splits" id="splitsTable"><thead><tr><th>Marca</th><th>Tempo</th><th>Pace</th><th>Δ meta</th></tr></thead><tbody></tbody></table>
+  </div>
+  <button class="btn btn-primary" onclick="goTo('setup')">Novo treino</button>
+</section>
+
+<!-- HISTORY -->
+<section id="screen-history" class="screen">
+  <div id="historyList"></div>
+</section>
+
+</main>
+
+<script>
+/* ---------------- state ---------------- */
+let cfg = {};
+let state = null;
+let tickTimer = null;
+let watchId = null;
+let audioCtx = null;
+
+const $ = id => document.getElementById(id);
+
+function goTo(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  $('screen-'+name).classList.add('active');
+  $('tabNovo').classList.toggle('active', name==='setup');
+  $('tabHist').classList.toggle('active', name==='history');
+  if(name==='history') renderHistory();
+}
+
+/* ---------------- setup UI wiring ---------------- */
+function setGoalType(v){
+  cfg._goalType = v;
+  document.querySelectorAll('#goalTypeSeg button').forEach(b=>b.classList.toggle('active', b.dataset.val===v));
+  $('fields-distance_time').style.display = v==='distance_time' ? 'block':'none';
+  $('fields-fixed_pace').style.display = v==='fixed_pace' ? 'block':'none';
+}
+function setCheckMode(v){
+  cfg._checkMode = v;
+  document.querySelectorAll('#checkModeSeg button').forEach(b=>b.classList.toggle('active', b.dataset.val===v));
+  $('wrapCheckTime').style.display = (v==='time'||v==='both') ? 'block':'none';
+  $('wrapCheckDist').style.display = (v==='distance'||v==='both') ? 'block':'none';
+}
+function toggleSwitch(id){
+  const el = $(id);
+  el.classList.toggle('on');
+  if(id==='swNegSplit') $('negSplitAmountWrap').style.display = el.classList.contains('on') ? 'block':'none';
+}
+$('inNegSplitPct') && $('inNegSplitPct').addEventListener('input', e=> $('negSplitPctLbl').textContent = e.target.value+'%');
+$('inTolerance') && $('inTolerance').addEventListener('input', e=> $('toleranceLbl').textContent = e.target.value+'%');
+setGoalType('distance_time');
+setCheckMode('both');
+
+/* ---------------- parsing helpers ---------------- */
+function parseMMSS(str){
+  const parts = str.split(':').map(s=>parseInt(s,10)||0);
+  if(parts.length===2) return parts[0]*60+parts[1];
+  if(parts.length===3) return parts[0]*3600+parts[1]*60+parts[2];
+  return parseInt(str,10)||0;
+}
+function fmtClock(sec){
+  sec = Math.max(0,Math.round(sec));
+  const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=sec%60;
+  if(h>0) return h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+function fmtPace(secPerKm){
+  if(!isFinite(secPerKm) || secPerKm<=0 || secPerKm>1800) return '--:--';
+  const m=Math.floor(secPerKm/60), s=Math.round(secPerKm%60);
+  return m+':'+String(s).padStart(2,'0');
+}
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371000, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* ---------------- build config from form ---------------- */
+function buildConfig(){
+  const c = {
+    goalType: cfg._goalType || 'distance_time',
+    negativeSplit: $('swNegSplit').classList.contains('on'),
+    splitBiasPct: parseFloat($('inNegSplitPct').value)/100,
+    checkMode: cfg._checkMode || 'both',
+    checkpointTimeSec: parseFloat($('inCheckTime').value)*60,
+    checkpointDistM: parseFloat($('inCheckDist').value)*1000,
+    tolerancePct: parseFloat($('inTolerance').value)/100,
+    voiceOn: $('swVoice').classList.contains('on'),
+    beepsOn: $('swBeeps').classList.contains('on'),
+    simulate: $('swSim').classList.contains('on'),
+  };
+  if(c.goalType==='distance_time'){
+    c.totalDistanceM = parseFloat($('inDist').value)*1000;
+    c.totalTimeSec = parseMMSS($('inTime').value);
+  } else {
+    const paceSec = parseMMSS($('inPace').value);
+    const durSec = parseMMSS($('inDur').value);
+    c.totalTimeSec = durSec;
+    c.totalDistanceM = (durSec/paceSec)*1000;
+  }
+  c.basePaceSecPerKm = c.totalTimeSec / (c.totalDistanceM/1000);
+  return c;
+}
+
+/* ---------------- workout engine ---------------- */
+function startWorkoutFlow(){
+  cfg = buildConfig();
+  if(!cfg.totalDistanceM || !cfg.totalTimeSec || cfg.basePaceSecPerKm<=0){
+    alert('Confira os valores de meta — algo ficou inválido.');
+    return;
+  }
+  state = {
+    startedAt: Date.now(),
+    elapsedSec: 0,
+    distanceM: 0,
+    paused: false,
+    points: [],       // {lat,lng,t}
+    samples: [],       // {t, distM} every second
+    checkpoints: [],   // announced checkpoints for summary table
+    lastCheckTime: 0,
+    lastCheckDist: 0,
+    lastExceptionAt: -999,
+    lastAnnounceAt: -999,
+    simHeading: Math.random()*Math.PI*2,
+    simLat: -23.55, simLng: -46.63,
+  };
+  $('rLog').innerHTML = '';
+  logLine('Treino iniciado. Meta: '+ (cfg.goalType==='distance_time' ? (cfg.totalDistanceM/1000).toFixed(1)+'km em '+fmtClock(cfg.totalTimeSec) : 'pace '+fmtPace(cfg.basePaceSecPerKm)+'/km por '+fmtClock(cfg.totalTimeSec)) + '.');
+  goTo('running');
+  $('pauseBtn').textContent='Pausar';
+  speak('Treino iniciado. Boa corrida.');
+
+  if(cfg.simulate){
+    $('statusDot').style.background = 'var(--brand)';
+  } else if(navigator.geolocation){
+    watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {enableHighAccuracy:true, maximumAge:2000, timeout:15000});
+  } else {
+    logLine('Geolocalização não disponível neste navegador. Ative o modo simulação.');
+  }
+  tickTimer = setInterval(tick, 1000);
+}
+
+function onPosition(pos){
+  const {latitude:lat, longitude:lng, accuracy, speed} = pos.coords;
+  if(accuracy && accuracy>35) return; // ignore low-accuracy fixes
+  const t = state.elapsedSec;
+  if(state.points.length>0){
+    const prev = state.points[state.points.length-1];
+    const dt = t - prev.t;
+    const d = haversine(prev.lat,prev.lng,lat,lng);
+    const impliedSpeed = dt>0 ? d/dt : 0; // m/s
+    if(impliedSpeed < 8 && d < 300){ // filter GPS jumps (>~28km/h implausible for running, generous cap)
+      state.distanceM += d;
+    }
+  }
+  state.points.push({lat,lng,t});
+  $('statusDot').style.background = 'var(--on)';
+}
+function onPositionError(err){
+  logLine('GPS: '+ err.message + '. Verifique a permissão de localização.');
+  $('statusDot').style.background = 'var(--accel)';
+  const banner = $('statusBanner');
+  banner.className = 'status-banner status-accelerate';
+  banner.textContent = 'SEM GPS — abra numa aba do navegador ou use simulação';
+}
+
+function togglePause(){
+  state.paused = !state.paused;
+  $('pauseBtn').textContent = state.paused ? 'Retomar' : 'Pausar';
+  logLine(state.paused ? 'Pausado.' : 'Retomado.');
+}
+
+function tick(){
+  if(!state || state.paused) return;
+  state.elapsedSec += 1;
+
+  if(cfg.simulate) simulateStep();
+
+  state.samples.push({t:state.elapsedSec, distM: state.distanceM});
+  if(state.samples.length>600) state.samples.shift();
+
+  updateRunningUI();
+  checkCheckpoints();
+  checkException();
+
+  // auto-finish
+  if(state.distanceM >= cfg.totalDistanceM || state.elapsedSec >= cfg.totalTimeSec*1.5){
+    finishWorkout();
+  }
+}
+
+function simulateStep(){
+  const progress = Math.min(1, state.distanceM/cfg.totalDistanceM);
+  const targetPace = targetPaceAt(progress);
+  const noise = (Math.random()-0.5)*0.16; // +-8%
+  const paceNow = targetPace*(1+noise);
+  const metersThisSec = 1000/paceNow;
+  state.distanceM += metersThisSec;
+  state.simHeading += (Math.random()-0.5)*0.3;
+  state.simLat += Math.cos(state.simHeading)*(metersThisSec/111111);
+  state.simLng += Math.sin(state.simHeading)*(metersThisSec/(111111*Math.cos(state.simLat*Math.PI/180)));
+  state.points.push({lat:state.simLat,lng:state.simLng,t:state.elapsedSec});
+}
+
+function targetPaceAt(progress){
+  if(!cfg.negativeSplit) return cfg.basePaceSecPerKm;
+  const b = cfg.splitBiasPct;
+  return cfg.basePaceSecPerKm * (1 + b*(1-2*Math.min(1,Math.max(0,progress))));
+}
+
+function rollingPace(windowSec){
+  const samples = state.samples;
+  if(samples.length<2) return null;
+  const last = samples[samples.length-1];
+  let ref = samples[0];
+  for(let i=samples.length-1;i>=0;i--){
+    if(last.t - samples[i].t >= windowSec){ ref = samples[i]; break; }
+    ref = samples[0];
+  }
+  const dt = last.t - ref.t, dd = last.distM - ref.distM;
+  if(dt<=0 || dd<=0) return Infinity;
+  return dt/(dd/1000);
+}
+function requiredPaceRemaining(){
+  const remDist = (cfg.totalDistanceM - state.distanceM)/1000;
+  const remTime = cfg.totalTimeSec - state.elapsedSec;
+  if(remDist<=0.01) return 0;
+  if(remTime<=0) return Infinity;
+  return remTime/remDist;
+}
+function computeStatus(){
+  const cur = rollingPace(45) ?? cfg.basePaceSecPerKm;
+  const need = requiredPaceRemaining();
+  if(!isFinite(need)) return {status:'accelerate', devPct: 999, cur, need};
+  if(need<=0) return {status:'on', devPct:0, cur, need};
+  const devPct = ((cur-need)/need)*100;
+  let status = 'on';
+  if(devPct > cfg.tolerancePct*100) status='accelerate';
+  else if(devPct < -cfg.tolerancePct*100) status='slow';
+  return {status, devPct, cur, need};
+}
+
+function updateRunningUI(){
+  $('rClock').textContent = fmtClock(state.elapsedSec);
+  $('rDist').textContent = (state.distanceM/1000).toFixed(2);
+  const {status, devPct, cur, need} = computeStatus();
+  $('rPace').textContent = fmtPace(cur);
+  $('rNeed').textContent = fmtPace(need);
+
+  const banner = $('statusBanner');
+  banner.className = 'status-banner status-'+status;
+  banner.textContent = status==='on' ? 'NO RITMO CERTO' : status==='accelerate' ? 'ACELERE UM POUCO' : 'REDUZA O RITMO';
+
+  const needle = $('gaugeNeedle');
+  const clamped = Math.max(-2, Math.min(2, devPct/(cfg.tolerancePct*100)));
+  needle.style.transform = 'rotate('+(clamped*70)+'deg)';
+}
+
+function checkCheckpoints(){
+  let fire=false;
+  const mode = cfg.checkMode;
+  if((mode==='time'||mode==='both') && (state.elapsedSec-state.lastCheckTime)>=cfg.checkpointTimeSec) fire=true;
+  if((mode==='distance'||mode==='both') && (state.distanceM-state.lastCheckDist)>=cfg.checkpointDistM) fire=true;
+  if(fire){
+    state.lastCheckTime = state.elapsedSec;
+    state.lastCheckDist = state.distanceM;
+    announceCheckpoint();
+  }
+}
+
+function announceCheckpoint(){
+  const {status, devPct, cur, need} = computeStatus();
+  const km = (state.distanceM/1000).toFixed(2);
+  const deltaSec = Math.round(Math.abs(cur-need));
+  let msg = 'Km '+km+', tempo '+fmtClock(state.elapsedSec)+'. Pace atual '+fmtPace(cur)+' por quilômetro. ';
+  if(status==='on') msg += 'Você está no ritmo certo para a meta.';
+  else if(status==='accelerate') msg += 'Você precisa acelerar cerca de '+deltaSec+' segundos por quilômetro para bater a meta.';
+  else msg += 'Você está adiantado. Pode reduzir cerca de '+deltaSec+' segundos por quilômetro.';
+
+  logLine(msg, true);
+  speak(msg);
+  beep(status);
+  state.lastAnnounceAt = state.elapsedSec;
+  state.checkpoints.push({label:'Km '+km, elapsedSec: state.elapsedSec, distM: state.distanceM, pace: cur, target: need, devPct, status});
+}
+
+function checkException(){
+  const {status, devPct} = computeStatus();
+  if(status==='on') return;
+  if(state.elapsedSec - state.lastAnnounceAt < 12) return;
+  if(state.elapsedSec - state.lastExceptionAt < 40) return;
+  state.lastExceptionAt = state.elapsedSec;
+  const msg = status==='accelerate' ? 'Atenção, você está ficando para trás da meta.' : 'Atenção, você está bem à frente da meta, cuidado para não queimar a energia.';
+  logLine('⚠ '+msg);
+  speak(msg);
+  beep(status);
+}
+
+function logLine(text, bold){
+  const div = document.createElement('div');
+  div.innerHTML = bold ? '<span>'+text+'</span>' : text;
+  $('rLog').prepend(div);
+}
+
+/* ---------------- audio ---------------- */
+function speak(text){
+  if(!cfg.voiceOn || !('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'pt-BR';
+  u.rate = 1.02;
+  window.speechSynthesis.speak(u);
+}
+function beep(status){
+  if(!cfg.beepsOn) return;
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const freq = status==='accelerate' ? 880 : status==='slow' ? 440 : 660;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = freq;
+    o.type='sine';
+    g.gain.setValueAtTime(0.001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+0.35);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime+0.37);
+  }catch(e){}
+}
+
+/* ---------------- finish + summary ---------------- */
+function finishWorkout(){
+  clearInterval(tickTimer);
+  if(watchId!==null) navigator.geolocation.clearWatch(watchId);
+  watchId=null;
+  const achieved = state.elapsedSec <= cfg.totalTimeSec*1.03 && state.distanceM >= cfg.totalDistanceM*0.97;
+  speak(achieved ? 'Treino finalizado. Você bateu a meta, parabéns!' : 'Treino finalizado.');
+
+  const record = {
+    id: Date.now(),
+    date: new Date().toISOString(),
+    cfg: cfg,
+    result: {
+      elapsedSec: state.elapsedSec,
+      distanceM: state.distanceM,
+      avgPace: state.elapsedSec/(state.distanceM/1000),
+      achieved,
+    },
+    checkpoints: state.checkpoints,
+    points: downsamplePoints(state.points, 80),
+  };
+  renderSummary(record);
+  saveWorkout(record);
+  goTo('summary');
+}
+
+function downsamplePoints(pts, max){
+  if(pts.length<=max) return pts;
+  const step = pts.length/max;
+  const out=[];
+  for(let i=0;i<max;i++) out.push(pts[Math.floor(i*step)]);
+  return out;
+}
+
+function renderSummary(rec){
+  $('sumTitle').textContent = rec.result.achieved ? 'Meta batida! 🎯' : 'Treino concluído';
+  $('sumBadgeWrap').textContent = rec.result.achieved ? 'OBJETIVO ALCANÇADO' : 'ABAIXO DA META';
+  $('sDist').textContent = (rec.result.distanceM/1000).toFixed(2);
+  $('sTime').textContent = fmtClock(rec.result.elapsedSec);
+  $('sPace').textContent = fmtPace(rec.result.avgPace);
+
+  drawMap(rec.points);
+  drawChart(rec.checkpoints, rec.cfg.basePaceSecPerKm);
+
+  const tbody = $('splitsTable').querySelector('tbody');
+  tbody.innerHTML='';
+  rec.checkpoints.forEach(cp=>{
+    const tr=document.createElement('tr');
+    const deltaTxt = (cp.devPct>=0?'+':'')+cp.devPct.toFixed(1)+'%';
+    tr.innerHTML = '<td>'+cp.label+'</td><td>'+fmtClock(cp.elapsedSec)+'</td><td>'+fmtPace(cp.pace)+'</td><td style="color:'+(cp.status==='on'?'var(--on)':cp.status==='accelerate'?'var(--accel)':'var(--slow)')+'">'+deltaTxt+'</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function drawMap(points){
+  const canvas = $('mapCanvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.clientWidth || 480; canvas.width=w; canvas.height=220;
+  ctx.clearRect(0,0,w,220);
+  if(points.length<2){ ctx.fillStyle='#7E8B96'; ctx.font='13px Inter'; ctx.fillText('Sem pontos de rota suficientes.',16,110); return; }
+  const lat0=points[0].lat, lng0=points[0].lng;
+  const proj = p => ({
+    x: (p.lng-lng0)*Math.cos(lat0*Math.PI/180)*111111,
+    y: -(p.lat-lat0)*111111
+  });
+  const proj_pts = points.map(proj);
+  const xs=proj_pts.map(p=>p.x), ys=proj_pts.map(p=>p.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const pad=24;
+  const sx = (w-2*pad)/Math.max(1,(maxX-minX));
+  const sy = (200-2*pad)/Math.max(1,(maxY-minY));
+  const s = Math.min(sx,sy);
+  const ox = pad - minX*s + (w-2*pad-(maxX-minX)*s)/2;
+  const oy = pad - minY*s + (200-2*pad-(maxY-minY)*s)/2;
+
+  ctx.strokeStyle='#4C9AFF'; ctx.lineWidth=3; ctx.lineJoin='round'; ctx.beginPath();
+  proj_pts.forEach((p,i)=>{ const x=p.x*s+ox, y=p.y*s+oy; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.stroke();
+
+  const startP = proj_pts[0], endP = proj_pts[proj_pts.length-1];
+  ctx.fillStyle='#34D399'; ctx.beginPath(); ctx.arc(startP.x*s+ox, startP.y*s+oy, 6,0,7); ctx.fill();
+  ctx.fillStyle='#F5484D'; ctx.beginPath(); ctx.arc(endP.x*s+ox, endP.y*s+oy, 6,0,7); ctx.fill();
+}
+
+function drawChart(checkpoints, basePace){
+  const canvas = $('chartCanvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.clientWidth || 480; canvas.width=w; canvas.height=160;
+  ctx.clearRect(0,0,w,160);
+  if(checkpoints.length===0){ ctx.fillStyle='#7E8B96'; ctx.font='13px Inter'; ctx.fillText('Sem marcas registradas.',16,80); return; }
+  const paces = checkpoints.map(c=>c.pace).filter(p=>isFinite(p));
+  const maxP = Math.max(...paces, basePace)*1.15, minP = Math.min(...paces, basePace)*0.85;
+  const padL=40, padB=20, padT=10;
+  const bw = (w-padL-10)/checkpoints.length;
+
+  // target line
+  const yFor = p => padT + (1-(p-minP)/(maxP-minP))*(160-padT-padB);
+  ctx.strokeStyle='#7E8B96'; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(padL, yFor(basePace)); ctx.lineTo(w-6, yFor(basePace)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  checkpoints.forEach((c,i)=>{
+    const x = padL + i*bw + bw*0.2;
+    const barW = bw*0.6;
+    const y = yFor(c.pace);
+    ctx.fillStyle = c.status==='on' ? '#34D399' : c.status==='accelerate' ? '#F5484D' : '#FBBF24';
+    ctx.fillRect(x, y, barW, (160-padB)-y);
+  });
+  ctx.fillStyle='#7E8B96'; ctx.font='10px JetBrains Mono';
+  ctx.fillText(fmtPace(maxP)+'/km', 2, padT+8);
+  ctx.fillText(fmtPace(minP)+'/km', 2, 160-padB);
+}
+
+/* ---------------- storage / history ---------------- */
+function safeStringify(obj){
+  return JSON.stringify(obj, (k,v)=>{
+    if(typeof v === 'number' && !isFinite(v)) return null;
+    return v;
+  });
+}
+async function saveWorkout(rec){
+  try{
+    await window.storage.set('workouts:'+rec.id, safeStringify(rec), false);
+  }catch(e){
+    console.error('storage error, tentando versão reduzida', e);
+    try{
+      const slim = {...rec, points:[]};
+      await window.storage.set('workouts:'+rec.id, safeStringify(slim), false);
+    }catch(e2){
+      console.error('storage error (fallback também falhou)', e2);
+      logHistorySaveFailure();
+    }
+  }
+}
+function logHistorySaveFailure(){
+  const note = document.createElement('div');
+  note.style.cssText='margin-top:10px;font-size:12px;color:var(--slow);';
+  note.textContent = 'Não foi possível salvar este treino no histórico agora.';
+  $('screen-summary').querySelector('.card').appendChild(note);
+}
+async function loadWorkouts(){
+  try{
+    const listRes = await window.storage.list('workouts:', false);
+    if(!listRes || !listRes.keys) return [];
+    const items = [];
+    for(const k of listRes.keys){
+      try{
+        const r = await window.storage.get(k, false);
+        if(r) items.push(JSON.parse(r.value));
+      }catch(e){}
+    }
+    return items.sort((a,b)=> b.id - a.id);
+  }catch(e){ return []; }
+}
+async function renderHistory(){
+  const list = $('historyList');
+  list.innerHTML = '<div class="empty">Carregando…</div>';
+  const items = await loadWorkouts();
+  if(items.length===0){
+    list.innerHTML = '<div class="empty"><div class="display">Nenhum treino ainda</div>Seus treinos aparecerão aqui depois de finalizados.</div>';
+    return;
+  }
+  list.innerHTML='';
+  items.forEach(rec=>{
+    const div = document.createElement('div');
+    div.className='history-item';
+    const d = new Date(rec.date);
+    const goalTxt = rec.cfg.goalType==='distance_time'
+      ? (rec.cfg.totalDistanceM/1000).toFixed(1)+'km em '+fmtClock(rec.cfg.totalTimeSec)
+      : fmtPace(rec.cfg.basePaceSecPerKm)+'/km';
+    div.innerHTML = '<div class="l"><strong>'+(rec.result.distanceM/1000).toFixed(2)+' km — '+fmtClock(rec.result.elapsedSec)+'</strong><small>'+d.toLocaleDateString('pt-BR')+' · meta: '+goalTxt+'</small></div>'+
+      '<span class="badge '+(rec.result.achieved?'badge-ok':'badge-no')+'">'+(rec.result.achieved?'Batida':'Não batida')+'</span>';
+    div.onclick = ()=>{ renderSummary(rec); goTo('summary'); };
+    list.appendChild(div);
+  });
+}
+</script>
+</body>
+</html>

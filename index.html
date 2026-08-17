@@ -292,6 +292,7 @@ table.splits td{padding:7px 4px;border-bottom:1px solid var(--line);}
       </div>
     </div>
     <canvas id="mapCanvas" height="220"></canvas>
+    <div class="hint" id="gpsQuality" style="display:none;"></div>
     <div class="attrib" id="mapAttrib" style="display:none;">Mapa © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></div>
   </div>
   <div class="card">
@@ -440,7 +441,12 @@ function startWorkoutFlow(){
     elapsedSec: 0,
     distanceM: 0,
     paused: false,
-    points: [],       // {lat,lng,t}
+    points: [],       // {lat,lng,t,ts,acc}
+    anchor: null,     // só usado no modo sem Doppler
+    speedEma: null,   // velocidade suavizada, para exibir o ritmo atual
+    lastSpeedTs: null,
+    lastV: null, lastVts: null,   // integração da velocidade → distância
+    accSum: 0, accN: 0,   // para relatar a precisão média do treino
     samples: [],       // {t, distM} every second
     checkpoints: [],   // announced checkpoints for summary table
     lastCheckTime: 0,
@@ -495,26 +501,81 @@ document.addEventListener('visibilitychange', ()=>{
   }
 });
 
+const SPEED_TAU  = 12;   // s — constante de tempo da suavização da velocidade
+const STOPPED_MS = 0.5;  // m/s — abaixo disso considera-se parado
+const MIN_STEP_M = 4;    // m — piso absoluto do ruído, mesmo com fix ótimo
+const MAX_MS     = 8;    // m/s (~29 km/h) — acima disso é leitura implausível
+// múltiplo da incerteza usado como piso no modo sem Doppler. Calibrado por
+// simulação: abaixo de ~3 a deriva parado vira centenas de metros; acima disso
+// a distância começa a ser subestimada em sinal ruim
+const NO_SPEED_FLOOR = 3.0;
+
 function onPosition(pos){
   if(!state || state.finished) return;
-  const {latitude:lat, longitude:lng, accuracy} = pos.coords;
+  const c = pos.coords;
+  const lat = c.latitude, lng = c.longitude;
+  const acc = (typeof c.accuracy === 'number' && isFinite(c.accuracy)) ? c.accuracy : null;
+  // instante real da leitura, não o nosso cronômetro: o fix pode chegar
+  // atrasado, e usar o relógio do app distorce a velocidade calculada
+  const ts = (typeof pos.timestamp === 'number' && pos.timestamp > 0) ? pos.timestamp : Date.now();
   state.gpsError = false;
+
   // o primeiro fix quase sempre vem impreciso (50–100m). Aceitá-lo apenas semeia
-  // a rota — não soma distância, porque não há ponto anterior — e tira o app do
-  // estado "sem GPS" em vez de deixar a distância travada em zero
+  // a rota — não soma distância, porque não há âncora — e tira o app do estado
+  // "sem GPS" em vez de deixar a distância travada em zero
   const accLimit = state.points.length===0 ? 100 : 40;
-  if(accuracy && accuracy>accLimit) return;
-  const t = state.elapsedSec;
-  if(state.points.length>0){
-    const prev = state.points[state.points.length-1];
-    const dt = t - prev.t;
-    const d = haversine(prev.lat,prev.lng,lat,lng);
-    const impliedSpeed = dt>0 ? d/dt : 0; // m/s
-    if(impliedSpeed < 8 && d < 300){ // filter GPS jumps (>~28km/h implausible for running, generous cap)
-      state.distanceM += d;
+  if(acc !== null && acc > accLimit) return;
+
+  // velocidade medida pelo próprio sistema por efeito Doppler: bem mais
+  // confiável para ritmo instantâneo do que subtrair duas posições ruidosas
+  // speed vem null (ou -1) quando o sistema não sabe; acima de MAX_MS é leitura
+  // implausível para corrida e não merece confiança
+  let v = (typeof c.speed === 'number' && isFinite(c.speed) && c.speed >= 0) ? c.speed : null;
+  if(v !== null && v > MAX_MS) v = null;
+  if(v !== null){
+    const dtS = state.lastSpeedTs ? Math.min(10, (ts - state.lastSpeedTs)/1000) : 1;
+    if(dtS > 0){
+      const alpha = 1 - Math.exp(-dtS/SPEED_TAU);
+      state.speedEma = (state.speedEma === null) ? v : state.speedEma + alpha*(v - state.speedEma);
+      state.lastSpeedTs = ts;
     }
   }
-  state.points.push({lat,lng,t});
+
+  if(v !== null){
+    // INTEGRA A VELOCIDADE em vez de somar deltas de posição. Somar posições
+    // ruidosas infla sistematicamente a distância — cada oscilação lateral
+    // vira comprimento e o erro nunca se cancela, só acumula. A velocidade
+    // Doppler tem ruído centrado em zero, então integrá-la faz os erros se
+    // anularem ao longo do percurso.
+    if(state.lastV !== null && state.lastVts !== null){
+      const dt = Math.min(5, (ts - state.lastVts)/1000);
+      if(dt > 0){
+        const vm = (v + state.lastV)/2;               // trapézio
+        if(vm >= STOPPED_MS) state.distanceM += vm*dt;
+      }
+    }
+    state.lastV = v; state.lastVts = ts;
+  } else {
+    // sem velocidade do sistema, resta somar posições — com um piso de ruído
+    // alto, porque aqui não há como distinguir deriva de movimento lento
+    const a = state.anchor;
+    if(!a){
+      state.anchor = {lat, lng, ts, acc};
+    } else {
+      const dtSec = (ts - a.ts)/1000;
+      const d = haversine(a.lat, a.lng, lat, lng);
+      // não move a âncora enquanto não superar o ruído: assim o movimento real
+      // vai se somando até vencer o limiar, em vez de ser descartado
+      const ruido = Math.max(MIN_STEP_M, NO_SPEED_FLOOR*Math.max(acc||0, a.acc||0));
+      if(dtSec > 0 && d >= ruido && d/dtSec < MAX_MS && d < 300){
+        state.distanceM += d;
+        state.anchor = {lat, lng, ts, acc};
+      }
+    }
+  }
+
+  state.points.push({lat, lng, t: state.elapsedSec, ts, acc});
+  if(acc !== null){ state.accSum += acc; state.accN++; }
   $('statusDot').style.background = 'var(--on)';
 }
 function onPositionError(err){
@@ -609,8 +670,16 @@ function requiredPaceRemaining(){
 function isWarmingUp(){
   return state.elapsedSec < cfg.warmupSec || state.distanceM < cfg.warmupMinM;
 }
+// ritmo atual: prefere a velocidade do GPS (Doppler), que é mais estável e
+// responde mais rápido; a média por distância entra quando ela não existe —
+// no modo simulação, ou em aparelhos que não preenchem coords.speed
+function currentPace(){
+  if(state.speedEma !== null && state.speedEma > STOPPED_MS) return 1000/state.speedEma;
+  const rp = rollingPace(45);
+  return (rp === null) ? cfg.basePaceSecPerKm : rp;
+}
 function computeStatus(){
-  const cur = rollingPace(45) ?? cfg.basePaceSecPerKm;
+  const cur = currentPace();
   const need = requiredPaceRemaining();
   // na largada a distância ainda é ~0 (GPS estabilizando + atleta saindo da
   // inércia), o pace calculado é infinito e qualquer julgamento aqui vira um
@@ -766,6 +835,7 @@ function finishWorkout(){
     },
     checkpoints: state.checkpoints,
     points: downsamplePoints(state.points, 80),
+    gps: {n: state.accN, avgAcc: state.accN ? state.accSum/state.accN : null},
   };
   renderSummary(record);
   saveWorkout(record);
@@ -790,6 +860,18 @@ function renderSummary(rec){
 
   drawMap(rec.points);
   drawChart(rec.checkpoints, rec.cfg.basePaceSecPerKm);
+
+  // qualidade do sinal: sem isso não dá para saber se um treino estranho foi
+  // culpa do ritmo ou do GPS
+  const q = rec.gps, qEl = $('gpsQuality');
+  if(q && q.n && q.avgAcc){
+    const m = Math.round(q.avgAcc);
+    const juizo = m<=10 ? 'ótimo' : m<=20 ? 'bom' : m<=30 ? 'razoável' : 'fraco';
+    qEl.style.display = 'block';
+    qEl.textContent = 'Sinal '+juizo+' — precisão média de '+m+' m em '+q.n+' leituras.';
+  } else {
+    qEl.style.display = 'none';
+  }
 
   const tbody = $('splitsTable').querySelector('tbody');
   tbody.innerHTML='';
